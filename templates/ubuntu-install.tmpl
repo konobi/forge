@@ -1,0 +1,7 @@
+kernel /netboot/ubuntu-installer/amd64/linux \
+        vga=788 -- quiet \
+        preseed/url=/boot/${net0/mac}/preseed.cfg
+#\
+#        preseed/url/checksum=5da499872becccfeda2c4872f9171c3d
+initrd /netboot/ubuntu-installer/amd64/initrd.gz
+boot
