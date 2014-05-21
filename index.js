@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-var forge = require('lib/forge');
+var forge = require('./lib/forge');
 
 var server = new forge({
     subnet: '172.16.184.0/24',
