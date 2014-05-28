@@ -2,6 +2,7 @@ var dhcp_server = require('node-dhcpd');
 var netmask = require('netmask').Netmask;
 var ee = require('events').EventEmitter;
 var util = require('util');
+var clone = require('clone');
 
 var requests = {};
 function _clean_request(mac_addr){
@@ -21,15 +22,40 @@ const
   DHCP_DISCOVER     = 1,
   DHCP_INFORM       = 8,
   DHCP_MINTYPE      = DHCP_DISCOVER,
-  DHCP_MAXTYPE      = DHCP_INFORM
-  DHCP_REQUESTED_IP = 0x32;
+  DHCP_MAXTYPE      = DHCP_INFORM,
+  DHCP_REQUESTED_IP = 0x32,
+  DHCP_HOST_NAME    = 0x0c;
 
 
 var leases = {};
+var ip_map = {};
 function lease_store (){
+  return this;
 }
-lease_store.prototype.get_lease = function get_lease () {
-}
+lease_store.prototype.save_lease = function save_lease (lease) {
+  var mac_addr = lease.chaddr;
+  leases[mac_addr] = lease;
+  ip_map[lease.yiaddr] = mac_addr;
+};
+lease_store.prototype.get_lease = function get_lease (mac_addr) {
+  if(leases[mac_addr]){
+    // ensure we return a new copy!!
+    return clone(leases[mac_addr]);
+  }
+  return;
+};
+lease_store.prototype.get_lease_by_ip = function get_lease_by_ip (ip) {
+  if(ip_map[ip]){
+    return leases[ ip_map[ip] ];
+  }
+  return;
+};
+lease_store.prototype.get_next_ip = function get_next_ip () {
+  var latest = Object.keys(ip_map).sort()[-1];
+  if(latest == undefined) return 0;
+  var next_ip = (ip2long(latest) + 1);
+  return long2ip(next_ip);
+};
 
 function dhcpd (opts) {
   var self = this;
@@ -71,16 +97,18 @@ function dhcpd (opts) {
     }
   }
 
-  self.s.on('message',  self.message.bind(self));
+  //self.s.on('message',  self.message.bind(self));
   self.s.on('discover', self.discover.bind(self));
   self.s.on('request', self.request.bind(self));
   self.s.on('decline', self.decline.bind(self));
   self.s.on('release', self.release.bind(self));
 
-  self.set_lease    = opts.save_lease;
-  self.save_lease   = opts.save_lease;
-  self.get_lease    = opts.get_lease;
-  self.remove_lease = opts.remove_lease;
+//  self.set_lease        = opts.save_lease;
+  self.save_lease       = opts.save_lease;
+  self.get_lease        = opts.get_lease;
+  self.get_lease_by_ip  = opts.get_lease_by_ip;
+  self.get_next_ip      = opts.get_next_ip;
+//  self.remove_lease     = opts.remove_lease;
 
   self.s.bind(67, '0.0.0.0', function() {
     self.s.setMulticastTTL(255);
@@ -94,7 +122,8 @@ function _get_option(pkt, opt) {
   return pkt.options[opt];
 }
 
-function pre_init (pkt) {
+dhcpd.prototype.pre_init = function pre_init (pkt) {
+  var self = this;
   // Ignore packet
   if(pkt.hlen != 6) return;
 
@@ -106,103 +135,110 @@ function pre_init (pkt) {
 
   // Get SERVER_ID if present
   var server_id_opt = _get_option(pkt, DHCP_SERVER_ID);
-  console.dir(server_id_opt);
-//  if (server_id_opt) {
-//    uint32_t server_id_network_order;
-//    move_from_unaligned32(server_id_network_order, server_id_opt);
-//    if (server_id_network_order != self.host) {
-//      return;
-//    }
-//  }
+  //console.dir(server_id_opt);
+  if (server_id_opt) {
+    if (server_id_opt != self.host) {
+      return;
+    }
+  }
 
   // Look for a static/dynamic lease
-//  var static_lease_nip = get_static_nip_by_mac(server_config.static_leases, pkt.chaddr);
-//  if (static_lease_nip) {
-//    bb_info_msg("Found static lease: %x", static_lease_nip);
-//    memcpy(&fake_lease.lease_mac, &packet.chaddr, 6);
-//    fake_lease.lease_nip = static_lease_nip;
-//    fake_lease.expires = 0;
-//    lease = &fake_lease;
-//  } else {
-//    lease = find_lease_by_mac(pkt.chaddr);
-//  }
+  var lease = self.get_lease(pkt.chaddr);
 
   // Get REQUESTED_IP if present
   var requested_ip_opt = _get_option(pkt, DHCP_REQUESTED_IP);
-  console.dir(requested_ip_opt);
-//  if (requested_ip_opt) {
-//    move_from_unaligned32(requested_nip, requested_ip_opt);
-//  return;
-//  }
+  //console.dir(requested_ip_opt);
+  return [lease, requested_ip_opt];
 }
 
-dhcpd.prototype.message = function message (msg) {
-  console.log('Received msg', msg);
-};
+//dhcpd.prototype.message = function message (msg) {
+//  console.log('Received msg', msg);
+//};
 
 
-
-
-dhcpd.prototype.discover = function discover (pkt, ip) {
+dhcpd.prototype.discover = function discover (pkt) {
     var self = this;
-    pre_init(pkt);
+    var ret = self.pre_init(pkt);
+    var lease = ret[0];
+    var ip = ret[1];
 
-    // XXX - Grab new lease to offer
-    // initialization state
-    // http://technet.microsoft.com/en-us/library/cc958935.aspx
-    //var subnet = self.subnet;
+    console.log("Got DISCOVER request");
+    var offer = {};
+    if(!lease){
+      console.log("Creating new lease");
+      if(ip && !self.get_lease_by_ip(ip) ){
+        // An IP has been requested and isn't in use
 
-    // either grab the current IP for this MAC or return a new
-    // ip address
+        // If we recieve an IP as part of the discover, make sure it's in our range
+        // otherwise NAK to put client back into INIT mode
+        if( ip && (ip2long(self.start_end[0]) <= ip2long(ip) <= ip2long(self.start_end[1])) ){
+          // Supplied IP is within the range
+          console.log("Using ip requested by client");
+          offer.yiaddr = ip;
+        } else {
+          console.log("Client requested invalid IP");
+          return self.s.nak(pkt);
+        }
+      } else {
+        // We need to get a new IP
+        console.log("Getting new IP");
+        var new_ip = self.get_next_ip();
+        if(new_ip == undefined) new_ip = self.start_end[0];
+        if(new_ip && (ip2long(self.start_end[0]) <= ip2long(new_ip) <= ip2long(self.start_end[1])) ){
+          console.log("Using new IP of: "+new_ip);
+          offer.yiaddr = new_ip;
+        }else {
+          // We don't have a new IP to offer =0(
+          console.log("Unable to find IP for use, ignoring");
+          return;
+        }
+      }
 
-    // If we recieve an IP as part of the discover, make sure it's in our range
-    // otherwise NAK to put client back into INIT mode
-    if( ip && (ip2long(self.start_end[0]) <= ip <= ip2long(self.start_end[1])) ){
-      // Supplied IP is within the range
-    } else {
-      return self.s.nak(pkt);
-    }
-
-    if( ip && self.ip_in_use(ip, pkt) ){
-      return self.s.nak(pkt);
-    }
-
-    var offer = {
-      yiaddr: ip,
-      options: {
+      offer.options = {
         1: self.netmask,
         3: self.routers,
         28: self.broadcast,
-        51: self.default_lease
+        51: self.default_lease,
       }
-    };
+      //var dhcp_host_opt = _get_option(pkt, DHCP_HOST_NAME);
+      //offer.options[ DHCP_HOST_NAME ] = dhcp_host_opt;
 
-    self.set_lease(offer, pkt);
-    if( !offer.yiaddr ) {
-      // We didn't get an IP, perhaps our range is full
-      return;
+    } else {
+      console.log("Using pre-existing lease's offer", lease);
+      offer = lease.offer;
     }
 
-    // Lets forget about this request after 60 seconds
-    var cleanup = function(){
-      _clean_request(pkt.chaddr);
-    };
-
     // Set a short-term record so we can match against XID
-    requests[pkt.chaddr] = {
-      xid: pkt.xid,
-      chaddr: pkt.chaddr,
-      offer: offer,
-      when: new Date(),
-      timeout_id: setTimeout(cleanup, 6000)
-    };
+    if(!requests[pkt.chaddr]){
+      // Lets forget about this request after 60 seconds
+      var cleanup = function(){
+        _clean_request(pkt.chaddr);
+      };
 
+      requests[pkt.chaddr] = {
+        xid: pkt.xid,
+        chaddr: pkt.chaddr,
+        offer: offer,
+        when: new Date(),
+        timeout_id: setTimeout(cleanup, 60000)
+      };
+    }
+
+/*
+    self.save_lease({
+      chaddr: pkt.chaddr,
+      yiaddr: offer.yiaddr,
+      offer_time: 60, //seconds
+      offer: offer
+    });
+*/
+    console.log("Making an offer:\n\tmac: "+pkt.chaddr+"\n\tip: "+offer.yiaddr);
     return self.s.offer(pkt, offer);
 };
 
 dhcpd.prototype.request = function request (pkt) {
     var cur_request = requests[pkt.chaddr];
-
+    console.log("GOT REQUEST");
     if(cur_request) {
       // We're serving a request based on a DISCOVER
 
@@ -269,13 +305,21 @@ dhcpd.prototype.inform = function inform (pkt) {
   return;
 };
 
-exports.ip2long = function (ip_address) {
+function long2ip(ip) {
+  if (!isFinite(ip))
+    return false;
+  return '' + [ip >>> 24, ip >>> 16 & 0xFF, ip >>> 8 & 0xFF, ip & 0xFF].join('.');
+}
+
+function ip2long (ip_address) {
   var parts = ip_address.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  return parts.length === 4 ?
+  return parts.length == 5 ?
       parseInt(+parts[1],10) * 16777216 + parseInt(+parts[2],10) * 65536 +
       parseInt(+parts[3],10) * 256      + parseInt(+parts[4],10) * 1
     : false;
 };
+
+var store = new lease_store();
 
 var server = new dhcpd({
     subnet: '172.16.184.0/24',
@@ -285,7 +329,9 @@ var server = new dhcpd({
     nameservers: [ '8.8.8.8', '8.8.4.4' ],
     //set_lease: set_lease,
     //save_lease: save_lease,
-    //get_lease: get_lease,
+    get_lease: function(){ store.get_lease(arguments) },
+    get_lease_by_ip: function(){ store.get_lease_by_ip(arguments) },
+    get_next_ip: function(){ store.get_next_ip(arguments) },
     //remove_lease: remove_lease,
     host: '192.168.119.1'
 });
