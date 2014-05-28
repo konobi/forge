@@ -3,7 +3,7 @@
     "tftp": "^0.1.0",
     "routes": "^1.1.0",
     "routil-static": "0.0.1",
-    "node-dhcpd": "git+https://github.com/glaszig/node-dhcpd",
+    "node-dhcpd": "git+https://github.com/konobi/node-dhcpd",
     "node-lmdb": "^0.2.1",
     "netmask": "^1.0.4",
     "ejs": "^1.0.0"
