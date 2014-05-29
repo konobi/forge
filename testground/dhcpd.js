@@ -32,6 +32,12 @@ var ip_map = {};
 function lease_store (){
   return this;
 }
+lease_store.prototype.remove_lease = function remove_lease (mac_addr) {
+  // XXX this should probably be made to be a lot more careful
+  var lease = this.get_lease(mac_addr);
+  delete ip_map[ lease.yiaddr ];
+  delete leases[mac_addr];
+}
 lease_store.prototype.save_lease = function save_lease (lease) {
   var mac_addr = lease.chaddr;
   leases[mac_addr] = clone(lease);
@@ -100,7 +106,7 @@ function dhcpd (opts) {
   self.get_lease        = opts.get_lease;
   self.get_lease_by_ip  = opts.get_lease_by_ip;
   self.get_next_ip      = opts.get_next_ip;
-//  self.remove_lease     = opts.remove_lease;
+  self.remove_lease     = opts.remove_lease;
 
   self.s.bind(67, '0.0.0.0', function() {
     self.s.setBroadcast(true);
@@ -329,7 +335,7 @@ var server = new dhcpd({
     get_lease: function(mac_addr){ return store.get_lease(mac_addr) },
     get_lease_by_ip: function(ip){ return store.get_lease_by_ip(ip) },
     get_next_ip: function(){ store.get_next_ip() },
-    //remove_lease: remove_lease,
+    remove_lease: function(mac_addr){ return store.remove_lease(mac_addr) },
     host: '192.168.119.1'
 });
 
