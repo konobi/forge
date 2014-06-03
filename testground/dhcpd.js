@@ -115,8 +115,8 @@ function dhcpd (opts) {
   self.remove_lease     = opts.remove_lease;
 
   self.s.bind(67, '0.0.0.0', function() {
-    self.s.setBroadcast(true);
-    self.s.setTTL(255)
+    //self.s.setBroadcast(true);
+    //self.s.setTTL(255)
     self.s.setMulticastTTL(255);
     self.s.addMembership('239.255.255.249', self.host);
     self.s.setMulticastLoopback(true);
@@ -249,43 +249,43 @@ dhcpd.prototype.request = function request (pkt) {
     var self = this;
     var cur_request = requests[pkt.chaddr];
     console.log("GOT REQUEST");
-    if(cur_request) {
-      // We're serving a request based on a DISCOVER
+    self.pre_init(pkt, function(lease, requested_ip) {
+      if(cur_request) {
+        // We're serving a request based on a DISCOVER
 
-      // if we'll receive a request from a client
-      // which sent a discover before but the xid
-      // does not match, discard the offer we sent
-      if(cur_request && cur_request.xid && cur_request.xid !== pkt.xid) {
-        _clean_request(pkt.chaddr);
-        return self.s.nak(pkt);
-      }
-
-      if(cur_request && cur_request.offer){
-        console.log("Receieved valid request from '"+pkt.chaddr+"' for ip '"+cur_request.offer.yiaddr+"'");
-        var mac_addr = pkt.chaddr + '';
-        console.log("mac: "+mac_addr+"   chaddr:"+pkt.chaddr);
-        var offer = clone(cur_request.offer);
-        self.save_lease({
-          yiaddr: cur_request.offer.yiaddr,
-          offer: offer,
-          chaddr: mac_addr
-        }, function() {
-          console.log("DONE");
+        // if we'll receive a request from a client
+        // which sent a discover before but the xid
+        // does not match, discard the offer we sent
+        if(cur_request && cur_request.xid && cur_request.xid !== pkt.xid) {
           _clean_request(pkt.chaddr);
-          return self.s.ack(pkt, offer);
-        });
-      }
-    } else {
-      // We're serving a request from a client that either didn't
-      // run a DISCOVER or has come back from reboot in INIT-REBOOT
-      // phase
-      // OR
-      // we're getting a request due to the client going into RENEW
-      // OR
-      // we're getting a request from the client because it's lease
-      // is about to expire
-      console.log("ATTEMPTING TO GET LEASE FOR:  "+pkt.chaddr);
-      self.get_lease(pkt.chaddr, function(lease){
+          return self.s.nak(pkt);
+        }
+
+        if(cur_request && cur_request.offer){
+          console.log("Receieved valid request from '"+pkt.chaddr+"' for ip '"+cur_request.offer.yiaddr+"'");
+          var mac_addr = pkt.chaddr + '';
+          console.log("mac: "+mac_addr+"   chaddr:"+pkt.chaddr);
+          var offer = clone(cur_request.offer);
+          self.save_lease({
+            yiaddr: cur_request.offer.yiaddr,
+            offer: offer,
+            chaddr: mac_addr
+          }, function() {
+            console.log("DONE");
+            _clean_request(pkt.chaddr);
+            return self.s.ack(pkt, offer);
+          });
+        }
+      } else {
+        // We're serving a request from a client that either didn't
+        // run a DISCOVER or has come back from reboot in INIT-REBOOT
+        // phase
+        // OR
+        // we're getting a request due to the client going into RENEW
+        // OR
+        // we're getting a request from the client because it's lease
+        // is about to expire
+        console.log("ATTEMPTING TO GET LEASE FOR:  "+pkt.chaddr);
         if(lease) {
           // we got a lease back, lets update it and
           var offer = {};
@@ -304,8 +304,8 @@ dhcpd.prototype.request = function request (pkt) {
           return self.s.nak(pkt);
         }
 
-      });
-    }
+      }
+  });
 };
 
 dhcpd.prototype.decline = function decline (pkt) {
