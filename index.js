@@ -6,10 +6,10 @@ var mem_store = require('./lib/memory-store');
 var store = new mem_store();
 
 var server = new forge({
-    subnet: '172.16.184.0/24',
-    range_start: '172.16.184.30',
-    range_end: '172.16.184.60',
-    routers: [ '172.16.184.1' ],
+    subnet: '192.168.119.0/24',
+    range_start: '192.168.119.30',
+    range_end: '192.168.119.60',
+    routers: [ '192.168.119.1' ],
     nameservers: [ '8.8.8.8', '8.8.4.4' ],
     save_lease: function(lease, cb){
       store.save_lease(lease, cb); },
