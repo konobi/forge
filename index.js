@@ -3,7 +3,7 @@
 var forge = require('./lib/forge');
 var mem_store = require('./lib/memory-store');
 
-var store = new mem_store();
+var store = new mem_store('192.168.119.30', '192.168.119.60');
 
 var server = new forge({
     subnet: '192.168.119.0/24',
