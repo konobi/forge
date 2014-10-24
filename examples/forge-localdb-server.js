@@ -6,7 +6,7 @@ var localdb = require('forge-localdb');
 var store = new localdb({
   path: './leases.db',
   start: '192.168.119.30',
-  end: '192.168.119.60
+  end: '192.168.119.60'
 });
 
 var server = new forge({
